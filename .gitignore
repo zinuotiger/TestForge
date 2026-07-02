@@ -1,0 +1,56 @@
+﻿# Node
+frontend/node_modules/
+frontend/dist/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Env
+.env
+!.env.example
+
+# Database
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
+
+# Vector database (ChromaDB)
+chroma_db/
+
+# Website test baselines (runtime data)
+website_baselines/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build
+dist/
+build/
+*.egg-info/
+*.tsbuildinfo
+
+# Logs
+*.log
+
+# Coverage
+.coverage
+htmlcov/
+
+# Pytest
+.pytest_cache/
+
+# SSL certs (generated locally)
+ssl/*.pem
+ssl/*.crt
+ssl/*.key

@@ -1,0 +1,57 @@
+# TestForge DSL 示例: 用户注册+登录流程
+name: 用户注册登录流程
+description: 完整的注册、验证、登录测试场景
+type: functional
+tags: [auth, user, e2e]
+
+variables:
+  base_url: http://localhost:9876
+  test_user: testuser_dsl
+  test_password: Test1234!
+
+steps:
+  - name: 注册新用户
+    request:
+      method: POST
+      url: /api/auth/register
+      body:
+        username: "{{test_user}}"
+        password: "{{test_password}}"
+    assert:
+      - status: 201
+      - jsonpath: $.user.id
+        equals: not_null
+
+  - name: 重复注册应失败
+    request:
+      method: POST
+      url: /api/auth/register
+      body:
+        username: "{{test_user}}"
+        password: "{{test_password}}"
+    assert:
+      - status: 409
+
+  - name: 登录
+    request:
+      method: POST
+      url: /api/auth/login
+      body:
+        username: "{{test_user}}"
+        password: "{{test_password}}"
+    extract:
+      token: $.access_token
+    assert:
+      - status: 200
+      - jsonpath: $.token_type
+        equals: bearer
+
+  - name: 密码错误
+    request:
+      method: POST
+      url: /api/auth/login
+      body:
+        username: "{{test_user}}"
+        password: wrongpassword
+    assert:
+      - status: 401

@@ -1,0 +1,45 @@
+version: "3.9"
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    ports:
+      - "9876:9876"
+    environment:
+      - TESTFORGE_LLM_PROVIDER=${TESTFORGE_LLM_PROVIDER:-dashscope}
+      - TESTFORGE_LLM_MODEL=${TESTFORGE_LLM_MODEL:-qwen-plus}
+      - TESTFORGE_LLM_API_KEY=${TESTFORGE_LLM_API_KEY}
+      - TESTFORGE_LLM_API_BASE=${TESTFORGE_LLM_API_BASE:-https://dashscope.aliyuncs.com/compatible-mode/v1}
+      - TESTFORGE_DATABASE_URL=sqlite+aiosqlite:///data/testforge.db
+      - TESTFORGE_SECRET_KEY=${TESTFORGE_SECRET_KEY:-change-me-in-production}
+      - TESTFORGE_DEBUG=${TESTFORGE_DEBUG:-false}
+      - TESTFORGE_LOG_LEVEL=${TESTFORGE_LOG_LEVEL:-INFO}
+      - TESTFORGE_SANDBOX_ENABLED=${TESTFORGE_SANDBOX_ENABLED:-true}
+      - TESTFORGE_ADMIN_USERNAME=${TESTFORGE_ADMIN_USERNAME:-admin}
+      - TESTFORGE_ADMIN_PASSWORD_HASH=${TESTFORGE_ADMIN_PASSWORD_HASH:-}
+      - TESTFORGE_CORS_ORIGINS=${TESTFORGE_CORS_ORIGINS:-http://localhost:3000,http://localhost:9876}
+    volumes:
+      - testforge_data:/app/data
+      # 注意：挂载 docker.sock 会赋予容器宿主机 Docker 控制权，仅在可信环境使用
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9876/api/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # 可选: Nginx 反向代理 + 静态文件
+  # nginx:
+  #   image: nginx:alpine
+  #   ports:
+  #     - "80:80"
+  #   volumes:
+  #     - ./docker/nginx.conf:/etc/nginx/nginx.conf:ro
+  #   depends_on:
+  #     - backend
+
+volumes:
+  testforge_data:

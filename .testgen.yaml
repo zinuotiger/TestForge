@@ -1,0 +1,65 @@
+project:
+  name: "testforge"
+  languages: [python]
+  test_directory: "tests"
+  source_directory: "backend"
+
+generation:
+  strategy: "auto"
+  ai:
+    provider: "dashscope"
+    model: "qwen-plus"
+    fallback_chain: [deepseek-chat, gpt-4o-mini]
+    max_tokens: 4096
+    temperature: 0.2
+  templates:
+    enabled: true
+    match_threshold: 0.8
+  target_coverage: 85
+  max_iterations: 5
+
+execution:
+  sandbox: "docker"
+  parallel: true
+  max_workers: 4
+  timeout_per_test: 30
+  timeout_total: 1800
+
+quality:
+  coverage:
+    enabled: true
+    threshold: 80
+    tool: "auto"
+  mutation:
+    enabled: false
+    threshold: 80
+    tools:
+      python: "mutmut"
+      java: "pitest"
+      javascript: "stryker"
+  flaky_detection:
+    enabled: true
+    rerun_count: 5
+  security_scan:
+    enabled: true
+    block_dangerous: true
+
+reporting:
+  formats: [junit, allure, json]
+  output_dir: "testgen-reports/"
+  badge: true
+
+ci:
+  github_actions: false
+  fail_on_regression: true
+  comment_pr: false
+
+cost_control:
+  monthly_budget: 50
+  template_first: true
+  model_tiering: true
+  max_llm_calls_per_run: 100
+
+notifications:
+  slack: ""
+  dingtalk: ""

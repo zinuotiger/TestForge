@@ -1,0 +1,559 @@
+"""网页爬虫 — 异步 BFS 爬取网站，提取页面/链接/表单/资源
+
+特性:
+  - 异步并发爬取（aiohttp + 信号量限流）
+  - 同域过滤，避免爬出目标站点
+  - robots.txt 尊重
+  - 页面元数据收集（标题/状态码/响应时间/内容类型）
+  - 链接/表单/资源（图片/脚本/样式）提取
+  - 爬取深度与数量上限保护
+  - 循环链接检测
+"""
+
+import asyncio
+import logging
+import re
+import time
+from dataclasses import dataclass, field
+from typing import Optional
+from urllib.parse import urljoin, urlparse, urldefrag
+
+import aiohttp
+
+logger = logging.getLogger("testforge")
+
+# 命中这些后缀的链接视为静态资源，不作为页面继续爬取
+_STATIC_ASSET_EXT = {
+    ".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".ico", ".bmp",
+    ".pdf", ".zip", ".tar", ".gz", ".rar", ".7z",
+    ".mp3", ".mp4", ".avi", ".mov", ".wav", ".flv",
+    ".css", ".js", ".woff", ".woff2", ".ttf", ".eot",
+    ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+    ".exe", ".dmg", ".pkg", ".deb", ".rpm",
+}
+
+
+@dataclass
+class FormInfo:
+    """表单信息"""
+    action: str                      # 表单提交 URL（已解析为绝对 URL）
+    method: str                      # GET / POST（大写）
+    fields: list[dict]               # [{name, type, required, placeholder}]
+    page_url: str                    # 表单所在页面
+
+
+@dataclass
+class PageInfo:
+    """单个页面的爬取信息"""
+    url: str
+    status: int = 0
+    title: str = ""
+    content_type: str = ""
+    response_time_ms: int = 0
+    depth: int = 0
+    links: list[str] = field(default_factory=list)             # 页面内链接（绝对 URL）
+    internal_links: list[str] = field(default_factory=list)    # 同域链接
+    external_links: list[str] = field(default_factory=list)    # 外部链接
+    forms: list[FormInfo] = field(default_factory=list)
+    images: list[str] = field(default_factory=list)
+    scripts: list[str] = field(default_factory=list)
+    styles: list[str] = field(default_factory=list)
+    h1: list[str] = field(default_factory=list)
+    meta_description: str = ""
+    error: str = ""
+    # selectolax 模式额外统计（用于可访问性检查）
+    _images_with_alt: int = 0
+    _images_total: int = 0
+
+
+@dataclass
+class CrawlResult:
+    """爬取结果"""
+    start_url: str
+    pages: list[PageInfo] = field(default_factory=list)
+    visited_count: int = 0
+    failed_count: int = 0
+    total_links: int = 0
+    broken_links: list[dict] = field(default_factory=list)     # [{url, status, parent}]
+    duration_ms: int = 0
+    max_depth_reached: int = 0
+    error: str = ""
+
+    def to_dict(self) -> dict:
+        return {
+            "start_url": self.start_url,
+            "visited_count": self.visited_count,
+            "failed_count": self.failed_count,
+            "total_links": self.total_links,
+            "broken_links_count": len(self.broken_links),
+            "duration_ms": self.duration_ms,
+            "max_depth_reached": self.max_depth_reached,
+            "error": self.error,
+            "pages": [
+                {
+                    "url": p.url,
+                    "status": p.status,
+                    "title": p.title,
+                    "content_type": p.content_type,
+                    "response_time_ms": p.response_time_ms,
+                    "depth": p.depth,
+                    "internal_links_count": len(p.internal_links),
+                    "external_links_count": len(p.external_links),
+                    "forms_count": len(p.forms),
+                    "images_count": len(p.images),
+                    "scripts_count": len(p.scripts),
+                    "h1": p.h1,
+                    "meta_description": p.meta_description,
+                    "error": p.error,
+                }
+                for p in self.pages
+            ],
+            "broken_links": self.broken_links,
+            "forms": [
+                {
+                    "action": f.action,
+                    "method": f.method,
+                    "field_count": len(f.fields),
+                    "fields": f.fields,
+                    "page_url": f.page_url,
+                }
+                for p in self.pages for f in p.forms
+            ],
+        }
+
+
+async def crawl_website(
+    start_url: str,
+    *,
+    max_depth: int = 2,
+    max_pages: int = 30,
+    max_concurrency: int = 5,
+    timeout: int = 10,
+    follow_external: bool = False,
+    respect_robots: bool = True,
+) -> CrawlResult:
+    """爬取网站
+
+    Args:
+        start_url: 起始 URL
+        max_depth: 最大爬取深度（0=只爬首页）
+        max_pages: 最大爬取页面数
+        max_concurrency: 并发数
+        timeout: 单页超时秒数
+        follow_external: 是否跟随外部链接（默认只爬同域）
+        respect_robots: 是否尊重 robots.txt
+
+    Returns:
+        CrawlResult
+    """
+    start = time.time()
+    result = CrawlResult(start_url=start_url)
+
+    parsed_start = urlparse(start_url)
+    if not parsed_start.scheme or not parsed_start.netloc:
+        result.error = f"无效的起始 URL: {start_url}"
+        return result
+    allowed_domain = parsed_start.netloc
+
+    # robots.txt
+    allowed_paths = None
+    if respect_robots:
+        allowed_paths = await _fetch_robots_rules(start_url, timeout)
+
+    timeout_cfg = aiohttp.ClientTimeout(total=timeout)
+    connector = aiohttp.TCPConnector(limit=max_concurrency, ssl=False)
+    headers = {
+        "User-Agent": "TestForgeBot/1.0 (+https://testforge.dev/crawler)",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    }
+
+    visited: set[str] = set()
+    queue: list[tuple[str, int]] = [(start_url, 0)]
+    semaphore = asyncio.Semaphore(max_concurrency)
+
+    async with aiohttp.ClientSession(timeout=timeout_cfg, connector=connector, headers=headers) as session:
+        while queue and len(visited) < max_pages:
+            # 取本批次（不超过信号量上限并发）
+            batch: list[tuple[str, int]] = []
+            while queue and len(batch) < max_concurrency and len(visited) + len(batch) < max_pages:
+                url, depth = queue.pop(0)
+                if depth > max_depth:
+                    continue
+                if url in visited:
+                    continue
+                visited.add(url)
+                batch.append((url, depth))
+
+            if not batch:
+                continue
+
+            tasks = [
+                _fetch_page(session, url, depth, semaphore)
+                for url, depth in batch
+            ]
+            pages = await asyncio.gather(*tasks, return_exceptions=False)
+
+            for (url, depth), page in zip(batch, pages):
+                result.pages.append(page)
+                if page.error:
+                    result.failed_count += 1
+                else:
+                    result.visited_count += 1
+                    result.max_depth_reached = max(result.max_depth_reached, depth)
+
+                # 记录死链（4xx/5xx）
+                if page.status >= 400:
+                    result.broken_links.append({
+                        "url": url,
+                        "status": page.status,
+                        "parent": _find_parent(result.pages, url),
+                    })
+
+                # 收集子链接继续爬取
+                if page.error or depth >= max_depth:
+                    continue
+                for link in page.internal_links:
+                    if link in visited:
+                        continue
+                    if allowed_paths is not None and not _is_allowed_by_robots(link, allowed_paths):
+                        continue
+                    if _is_static_asset(link):
+                        continue
+                    queue.append((link, depth + 1))
+
+            result.total_links = sum(len(p.links) for p in result.pages)
+
+    result.duration_ms = int((time.time() - start) * 1000)
+    logger.info(
+        "爬取完成: %s | 访问 %d 页 | 失败 %d | 死链 %d | 耗时 %dms",
+        start_url, result.visited_count, result.failed_count,
+        len(result.broken_links), result.duration_ms,
+    )
+    return result
+
+
+async def _fetch_page(
+    session: aiohttp.ClientSession,
+    url: str,
+    depth: int,
+    semaphore: asyncio.Semaphore,
+) -> PageInfo:
+    """抓取单个页面并解析"""
+    async with semaphore:
+        page = PageInfo(url=url, depth=depth)
+        t0 = time.time()
+        try:
+            async with session.get(url, allow_redirects=True) as resp:
+                page.status = resp.status
+                page.content_type = resp.headers.get("Content-Type", "")
+                page.response_time_ms = int((time.time() - t0) * 1000)
+                # 只解析 HTML
+                if "text/html" not in page.content_type and "application/xhtml" not in page.content_type:
+                    return page
+                html = await resp.text(errors="ignore")
+        except asyncio.TimeoutError:
+            page.error = f"请求超时"
+            page.response_time_ms = int((time.time() - t0) * 1000)
+            return page
+        except aiohttp.ClientError as e:
+            page.error = f"请求失败: {e}"
+            page.response_time_ms = int((time.time() - t0) * 1000)
+            return page
+        except Exception as e:
+            page.error = f"未知错误: {e}"
+            page.response_time_ms = int((time.time() - t0) * 1000)
+            return page
+
+        # 解析 HTML
+        _parse_html(url, html, page)
+        return page
+
+
+def _parse_html(base_url: str, html: str, page: PageInfo) -> None:
+    """从 HTML 提取链接/表单/资源
+
+    解析策略:
+      1. selectolax 优先（C 级性能，精确 DOM 解析）
+      2. 降级为正则（零依赖，粗略匹配）
+    """
+    if _try_parse_with_selectolax(base_url, html, page):
+        return
+    _parse_with_regex(base_url, html, page)
+
+
+# 尝试用 selectolax 解析
+try:
+    from selectolax.parser import HTMLParser as _SelectolaxParser
+    _has_selectolax = True
+except ImportError:
+    _has_selectolax = False
+
+
+def _try_parse_with_selectolax(base_url: str, html: str, page: PageInfo) -> bool:
+    """用 selectolax 精确解析 HTML"""
+    if not _has_selectolax:
+        return False
+    try:
+        tree = _SelectolaxParser(html)
+    except Exception:
+        return False
+
+    parsed_base = urlparse(base_url)
+
+    # 标题
+    title_node = tree.css_first("title")
+    if title_node:
+        page.title = _strip_tags(title_node.text()).strip()[:200]
+
+    # h1
+    page.h1 = [
+        _strip_tags(n.text()).strip()
+        for n in tree.css("h1")[:5]
+    ]
+
+    # meta description
+    meta_node = tree.css_first('meta[name="description"]')
+    if meta_node:
+        page.meta_description = (meta_node.attributes.get("content") or "").strip()[:300]
+
+    # 链接
+    seen: set[str] = set()
+    for a in tree.css("a[href]"):
+        href = (a.attributes.get("href") or "").strip()
+        if not href or href.startswith("#") or href.lower().startswith(("javascript:", "mailto:", "tel:", "data:")):
+            continue
+        absolute = urljoin(base_url, href)
+        absolute, _ = urldefrag(absolute)
+        if absolute in seen:
+            continue
+        seen.add(absolute)
+        page.links.append(absolute)
+        parsed = urlparse(absolute)
+        if parsed.scheme in ("http", "https"):
+            if parsed.netloc == parsed_base.netloc:
+                page.internal_links.append(absolute)
+            else:
+                page.external_links.append(absolute)
+
+    # 图片
+    page.images = list({
+        urljoin(base_url, (img.attributes.get("src") or "").strip())
+        for img in tree.css("img[src]")
+        if (img.attributes.get("src") or "").strip() and not img.attributes.get("src", "").startswith("data:")
+    })
+
+    # 脚本
+    page.scripts = list({
+        urljoin(base_url, (s.attributes.get("src") or "").strip())
+        for s in tree.css("script[src]")
+        if (s.attributes.get("src") or "").strip()
+    })
+
+    # 样式
+    page.styles = list({
+        urljoin(base_url, (l.attributes.get("href") or "").strip())
+        for l in tree.css('link[rel="stylesheet"]')
+        if (l.attributes.get("href") or "").strip()
+    })
+
+    # 图片 alt 统计（用于可访问性检查）
+    page._images_with_alt = sum(1 for img in tree.css("img[alt]") if img.attributes.get("alt", "").strip())
+    page._images_total = len(tree.css("img"))
+
+    # 表单
+    page.forms = _extract_forms_selectolax(base_url, tree)
+
+    return True
+
+
+def _extract_forms_selectolax(base_url: str, tree) -> list[FormInfo]:
+    """用 selectolax 提取表单"""
+    forms: list[FormInfo] = []
+    for form_node in tree.css("form"):
+        action_raw = (form_node.attributes.get("action") or "").strip()
+        action = urljoin(base_url, action_raw) if action_raw else base_url
+        method = (form_node.attributes.get("method") or "GET").upper()
+        if method not in ("GET", "POST", "PUT", "DELETE", "PATCH"):
+            method = "GET"
+
+        fields: list[dict] = []
+        for inp in form_node.css("input[name]"):
+            name = inp.attributes.get("name", "")
+            if not name:
+                continue
+            required = inp.attributes.get("required") is not None
+            fields.append({
+                "name": name,
+                "type": inp.attributes.get("type", "text") or "text",
+                "required": required,
+                "placeholder": inp.attributes.get("placeholder", "") or "",
+            })
+        # textarea / select
+        for sel in form_node.css("textarea[name], select[name]"):
+            name = sel.attributes.get("name", "")
+            if name:
+                fields.append({"name": name, "type": "text", "required": False, "placeholder": ""})
+
+        forms.append(FormInfo(action=action, method=method, fields=fields, page_url=base_url))
+    return forms
+
+
+def _parse_with_regex(base_url: str, html: str, page: PageInfo) -> None:
+    """正则降级解析（selectolax 不可用时使用）"""
+    # 标题
+    m = re.search(r"<title[^>]*>(.*?)</title>", html, re.IGNORECASE | re.DOTALL)
+    if m:
+        page.title = _strip_tags(m.group(1)).strip()[:200]
+
+    # h1
+    page.h1 = [
+        _strip_tags(x).strip()
+        for x in re.findall(r"<h1[^>]*>(.*?)</h1>", html, re.IGNORECASE | re.DOTALL)
+    ][:5]
+
+    # meta description
+    m = re.search(
+        r'<meta\s+[^>]*name=["\']description["\'][^>]*content=["\']([^"\']*)["\']',
+        html, re.IGNORECASE,
+    )
+    if m:
+        page.meta_description = m.group(1).strip()[:300]
+
+    # 链接 <a href>
+    raw_links = re.findall(r'<a\s+[^>]*href=["\']([^"\']+)["\']', html, re.IGNORECASE)
+    seen: set[str] = set()
+    parsed_base = urlparse(base_url)
+    for href in raw_links:
+        href = href.strip()
+        if not href or href.startswith("#") or href.lower().startswith(("javascript:", "mailto:", "tel:", "data:")):
+            continue
+        absolute = urljoin(base_url, href)
+        absolute, _ = urldefrag(absolute)  # 去掉 #fragment
+        if absolute in seen:
+            continue
+        seen.add(absolute)
+        page.links.append(absolute)
+        parsed = urlparse(absolute)
+        if parsed.scheme not in ("http", "https"):
+            continue
+        if parsed.netloc == parsed_base.netloc:
+            page.internal_links.append(absolute)
+        else:
+            page.external_links.append(absolute)
+
+    # 图片
+    page.images = list({
+        urljoin(base_url, src.strip())
+        for src in re.findall(r'<img\s+[^>]*src=["\']([^"\']+)["\']', html, re.IGNORECASE)
+        if src.strip() and not src.startswith("data:")
+    })
+
+    # 脚本
+    page.scripts = list({
+        urljoin(base_url, src.strip())
+        for src in re.findall(r'<script\s+[^>]*src=["\']([^"\']+)["\']', html, re.IGNORECASE)
+        if src.strip()
+    })
+
+    # 样式
+    page.styles = list({
+        urljoin(base_url, src.strip())
+        for src in re.findall(r'<link\s+[^>]*href=["\']([^"\']+)["\'][^>]*rel=["\']stylesheet["\']', html, re.IGNORECASE)
+        if src.strip()
+    })
+
+    # 表单（块匹配，便于提取字段）
+    page.forms = _extract_forms_regex(base_url, html)
+
+
+def _extract_forms_regex(base_url: str, html: str) -> list[FormInfo]:
+    """正则提取表单及其字段（selectolax 不可用时使用）"""
+    forms: list[FormInfo] = []
+    for form_html in re.findall(r"<form\b[^>]*>.*?</form>", html, re.IGNORECASE | re.DOTALL):
+        # action
+        m = re.search(r'<form\b[^>]*action=["\']([^"\']*)["\']', form_html, re.IGNORECASE)
+        action_raw = m.group(1).strip() if m else ""
+        action = urljoin(base_url, action_raw) if action_raw else base_url
+        # method
+        m = re.search(r'<form\b[^>]*method=["\']([^"\']+)["\']', form_html, re.IGNORECASE)
+        method = (m.group(1).upper() if m else "GET") or "GET"
+        if method not in ("GET", "POST", "PUT", "DELETE", "PATCH"):
+            method = "GET"
+
+        # 字段
+        fields: list[dict] = []
+        for field_html in re.findall(r"<input\b[^>]*>", form_html, re.IGNORECASE):
+            name = _attr(field_html, "name")
+            if not name:
+                continue
+            fields.append({
+                "name": name,
+                "type": _attr(field_html, "type") or "text",
+                "required": "required" in field_html.lower(),
+                "placeholder": _attr(field_html, "placeholder") or "",
+            })
+        # textarea / select
+        for field_html in re.findall(r"<(?:textarea|select)\b[^>]*name=[\"\']([^\"\']+)[\"\'][^>]*>", form_html, re.IGNORECASE):
+            fields.append({"name": field_html, "type": "text", "required": False, "placeholder": ""})
+
+        forms.append(FormInfo(action=action, method=method, fields=fields, page_url=base_url))
+    return forms
+
+
+def _attr(tag: str, name: str) -> str:
+    """提取 HTML 标签属性值"""
+    m = re.search(rf'{name}\s*=\s*["\']([^"\']*)["\']', tag, re.IGNORECASE)
+    return m.group(1) if m else ""
+
+
+def _strip_tags(text: str) -> str:
+    """去除 HTML 标签并解码常见实体"""
+    text = re.sub(r"<[^>]+>", "", text)
+    for entity, char in [("&amp;", "&"), ("&lt;", "<"), ("&gt;", ">"), ("&quot;", '"'), ("&#39;", "'"), ("&nbsp;", " ")]:
+        text = text.replace(entity, char)
+    return text
+
+
+def _is_static_asset(url: str) -> bool:
+    """判断 URL 是否为静态资源"""
+    path = urlparse(url).path.lower()
+    return any(path.endswith(ext) for ext in _STATIC_ASSET_EXT)
+
+
+def _is_allowed_by_robots(url: str, rules) -> bool:
+    """检查 URL 是否被 robots.txt 允许（简化版）"""
+    if rules is None:
+        return True
+    try:
+        return rules.can_fetch("TestForgeBot", url)
+    except Exception:
+        return True
+
+
+async def _fetch_robots_rules(start_url: str, timeout: int):
+    """获取 robots.txt 规则"""
+    parsed = urlparse(start_url)
+    robots_url = f"{parsed.scheme}://{parsed.netloc}/robots.txt"
+    try:
+        from urllib.robotparser import RobotFileParser
+        import aiohttp as _aiohttp
+        timeout_cfg = _aiohttp.ClientTimeout(total=timeout)
+        async with _aiohttp.ClientSession(timeout=timeout_cfg) as session:
+            async with session.get(robots_url) as resp:
+                if resp.status != 200:
+                    return None
+                content = await resp.text()
+        rp = RobotFileParser()
+        rp.parse(content.splitlines())
+        return rp
+    except Exception as e:
+        logger.debug("获取 robots.txt 失败（忽略）: %s", e)
+        return None
+
+
+def _find_parent(pages: list[PageInfo], url: str) -> str:
+    """找出链接到该 URL 的父页面"""
+    for p in pages:
+        if url in p.internal_links or url in p.links:
+            return p.url
+    return ""
