@@ -1,13 +1,30 @@
-# TestForge
+﻿# TestForge 🚧
 
-> AI 驱动的全类型智能测试平台 —— 代码分析 → 测试生成 → 自动执行 → 智能修复，覆盖 Web/API/CLI 三种入口
+> AI 驱动的全类型智能测试平台 —— 代码分析 → 测试生成 → 自动执行 → 智能修复
 
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/)
-[![Tests](https://img.shields.io/badge/tests-195-brightgreen.svg)]()
 [![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
-[![Lines](https://img.shields.io/badge/backend-24k_lines-9cf.svg)]()
 
-**TestForge 解决的问题**：开发者写测试太慢、AI 工具只能生成不能执行验证、现有测试平台缺少多策略融合。TestForge 把代码分析、多策略测试生成、沙箱执行、安全扫描、AI Agent 串成一个闭环，你只需要提供代码，它帮你完成从"没有测试"到"有测试且通过了"的全流程。
+## 项目状态
+
+**当前阶段：早期开发 / MVP 验证**
+
+| 状态 | 功能 |
+|:--:|------|
+| ✅ | **网站测试** — URL 输入 → 自动爬虫扫描 → 综合测试 → PDF 报告 |
+| ✅ | **代码测试** — 代码/项目输入 → 分析 → 生成 → 执行 → 安全扫描 |
+| ✅ | **Token 用量** — LLM 调用量统计与追踪 |
+| ✅ | **系统设置** — LLM / SMTP / 应用配置管理 |
+| 🚧 | 测试设计器 — 仅路由存在，交互未完 |
+| 🚧 | 执行中心 — 仅路由存在，执行流程未闭环 |
+| 🔮 | Multi-Agent 协作 — 架构已搭建，待集成调试 |
+| 🔮 | 自进化引擎 — 框架存在，未接入实际流水线 |
+| 🔮 | TIA 影响分析 — 调用链已实现，未接入 CI |
+| 🔮 | RAG 检索增强 — ChromaDB 已集成，知识库未填充 |
+| 🔮 | 定时巡检 — 调度器框架存在，未配置任务 |
+| 🔮 | 报告中心 — 后端就绪，前端统计页未完成 |
+
+> **面试说明**：本项目为个人全栈 Demo，核心已验证功能为网站测试 + 代码测试闭环。其余功能为架构预留代码，展示了模块化扩展能力。独立精简版见 [TestForge-Core](https://github.com/zinuotiger/TestForge-Core)。
 
 ---
 
@@ -16,31 +33,25 @@
 ```
 Users
  │
- ├── Web UI (React + TypeScript)   ── 可视化设计器、执行中心、Agent Playground
- ├── CLI  (testgen 命令)           ── 命令行触发生成/执行/分析/报告
+ ├── Web UI (React + TypeScript)   ── 可视化设计器、执行中心
  └── API  (REST + WebSocket)       ── CI/CD 集成、外部调用
          │
          ▼
 ┌──────────────────────────────────────────────────┐
 │            FastAPI Backend (Port 9876)            │
 │                                                   │
-│  ┌──────────┬──────────┬──────────┐              │
-│  │ Analyzer │Generator │ Executor │  多语言 AST   │
-│  │ 静态分析  │ 五策略生成 │ 沙箱执行  │  安全扫描     │
+│  ┌──────────┬──────────┬──────────┐ ✅ 已实现    │
+│  │ Analyzer │Generator │ Executor │  安全扫描     │
 │  ├──────────┼──────────┼──────────┤              │
-│  │  Safety  │ Reporter │  Quality │  覆盖率/变异   │
-│  │ 认证/限流  │ 多格式报告 │  健康度   │  Flaky检测   │
+│  │  Safety  │ Reporter │  Quality │ 认证+限流      │
 │  └──────────┴──────────┴──────────┘              │
 │                                                   │
-│  ┌──────────────────────────────────────┐        │
-│  │         Multi-Agent 协作系统           │        │
-│  │  Orchestrator → Analyst → Generator   │        │
-│  │                  ↓         ↓          │        │
-│  │               Reviewer ← Executor     │        │
-│  │   (ReAct + Function Calling + 反思自纠) │        │
+│  ┌──────────────────────────────────────┐ 🔮 规划中│
+│  │         Multi-Agent 协作系统           │         │
+│  │  RAG (ChromaDB)   自进化引擎           │         │
 │  └──────────────────────────────────────┘        │
 │                                                   │
-│  ChromaDB (RAG)   SQLite / PostgreSQL             │
+│  SQLite ✅                     PostgreSQL 🔮       │
 └──────────────────────────────────────────────────┘
 ```
 
@@ -48,89 +59,93 @@ Users
 
 ## 核心能力
 
-**五策略融合测试生成**
-
-| 策略 | 引擎 | 成本 | 适用场景 |
-|------|------|:--:|------|
-| AI/LLM | LiteLLM 100+ 模型 (DashScope / DeepSeek / Ollama) | API | 复杂逻辑、多步骤场景 |
-| 搜索进化 | EvoSuite (Java) | 算力 | 分支覆盖、边界值 |
-| 属性测试 | Hypothesis / fast-check | 零 | 数据处理、fuzzing |
-| 流量录制 | Keploy (eBPF) + 内置代理降级 | 零 | API 接口、集成测试 |
-| 模板引擎 | 11 预置场景模板 | 零 | CRUD、认证、分页 |
-
-**AI Agent 自主测试**
-
-- 5 个协作 Agent：Orchestrator → Analyst → Generator → Executor → Reviewer
-- ReAct + Function Calling，LLM 自主决策每一步
-- 反思自纠：Reviewer 不通过 → 反馈给 Generator 重新生成（最多重试 2 次）
-- 三种 Agent 框架可切换对比：自研 ReAct / 自研多 Agent / LangGraph StateGraph
-
-**多语言 AST 分析**
-
-- tree-sitter 精确解析（C 级性能）：Python / JavaScript / TypeScript / Java / Go / C++
-- 代码异味检测：高复杂度 / 长函数 / 过多参数 / 硬编码密钥 / TODO
-- 函数级调用图提取，支持 TIA 影响分析
-
-**智能分析与自愈**
-
-- **TIA**（Test Impact Analysis）：Git diff → 调用链追踪 → 只跑受影响的测试
-- **Flaky 检测**：贝叶斯统计后验估计
-- **变异测试**：mutmut (Python) / PITest (Java) / Stryker (JS/TS) + 内置降级方案
-- **自愈引擎**：UI 选择器修复 / API Schema 适配 / 断言语义修正
-
-**RAG 检索增强**（ChromaDB）
-
-- BGE 中文 embedding 模型，语义级检索
-- 三级降级：BGE → LiteLLM API → TF-IDF（零依赖可用）
-- 测试用例自动入库，生成时检索相似用例参考
-
-**企业级认证与安全**
-
-- JWT 认证 (access_token 24h + refresh_token 7d)
-- RBAC 三级权限：Admin / Editor / Viewer
-- 密码 PBKDF2-SHA256 (200k 迭代)
-- 登录速率限制、全局异常处理 + trace_id 追踪
-
-**网站自动测试**
+### ✅ 网站测试
 
 - OpenAPI/Swagger 文档导入 → 自动解析所有端点 → 生成测试用例
 - 网页爬虫：死链检测 / 表单测试 / SEO 检查 / 性能审计 / JS 错误捕获
-- 综合健康评分 0-100
+- 综合健康评分 0-100 + PDF 报告导出
+
+### ✅ 代码测试
+
+- 代码/项目输入 → AST 分析 → 测试用例生成 → 沙箱安全执行 → 结果报告
+- 支持 Python、JavaScript、TypeScript、Java、Go、C++ 多语言
+- 安全扫描：密钥泄露检测 / Prompt 注入防护
+
+### ✅ 认证与安全
+
+- JWT 认证 (access_token 24h + refresh_token 7d)
+- RBAC 三级权限：Admin / Editor / Viewer
+- 密码 PBKDF2-SHA256、登录速率限制、全局异常处理
+
+### 🔮 多策略融合测试生成（规划中）
+
+| 策略 | 引擎 | 状态 |
+|------|------|:--:|
+| AI/LLM | LiteLLM (DashScope / DeepSeek / Ollama) | 🚧 |
+| 搜索进化 | EvoSuite (Java) | 🔮 |
+| 属性测试 | Hypothesis / fast-check | 🔮 |
+| 流量录制 | Keploy (eBPF) | 🔮 |
+| 模板引擎 | 11 预置场景模板 | 🔮 |
+
+### 🔮 AI Agent 自主测试（架构就绪，待联调）
+
+- 5 个协作 Agent 框架：Orchestrator → Analyst → Generator → Executor → Reviewer
+- 三种框架可切换：自研 ReAct / 自研多 Agent / LangGraph StateGraph
+- ReAct + Function Calling 决策循环已实现，端到端闭环待调试
+
+### 🔮 智能分析与自愈（框架存在）
+
+- **TIA**（Test Impact Analysis）：Git diff → 调用链追踪，已实现调用图，未接入 CI
+- **Flaky 检测**：贝叶斯统计后验估计，算法已实现
+- **自愈引擎**：UI 选择器修复 / API Schema 适配，框架存在
+
+### 🔮 RAG 检索增强（引擎就绪）
+
+- BGE 中文 embedding 模型 + ChromaDB，三级降级方案
+- 检索引擎已集成，测试知识库待填充
 
 ---
 
 ## 项目规模
 
-| 模块 | 行数 | 文件数 |
-|------|-----:|------:|
-| Backend (Python) | 24,173 | 106 |
-| Frontend (React/TS) | 6,504 | 20 |
-| CLI (Python) | 451 | 1 |
-| Tests (pytest) | 5,209 | 14 |
-| **总计** | **36,337** | **141** |
+| 模块 | 行数 | 说明 |
+|------|-----:|------|
+| Backend (Python) | ~24,000 | 含规划中功能的代码框架 |
+| Frontend (React/TS) | ~6,500 | 含规划中页面的路由 |
+| **核心已验证代码** | **~10,000** | 网站测试 + 代码测试 + Token + 设置 |
 
-**195 个测试用例，全部通过。**
+> 项目整体代码量较大，因为采用了"架构优先"的模块化设计，24 个后端模块目录 + 14 个前端页面已预先搭建。独立精简版（仅核心功能，10,000 行）见桌面文件夹 `TestForge-Core`。
+
+---
+
+## 前端页面
+
+| 状态 | 页面 | 说明 |
+|:--:|------|------|
+| ✅ | 网站测试 | 输入 URL → 自动扫描+测试+PDF 报告 |
+| ✅ | 代码测试 | 单文件/项目级代码综合测试 |
+| ✅ | Token 用量 | LLM 调用量统计 |
+| ✅ | 设置 | LLM / SMTP / 应用配置 |
+| 🚧 | Dashboard | 仅路由留存 |
+| 🚧 | 测试设计器 | 仅路由留存 |
+| 🔮 | Agent Playground | 页面已有，后端待联调 |
+| 🔮 | 报告 | 后端就绪，前端待完善 |
 
 ---
 
 ## 为什么这样设计
 
-这些是面试中会真正被问到的问题：
+**为什么代码量大但核心功能少？**
 
-**为什么有三个入口（Web UI / CLI / API）而不是合在一起？**
-不同场景需要不同交互方式：开发者本地调试用 CLI，团队可视化查看用 Web UI，CI/CD 流水线用 REST API。三者共享同一套后端，但互不依赖，各自可以独立演进。
+项目采用"架构优先"策略：先用模块化设计搭建完整骨架，再逐步填充。好处是每个功能独立在对应目录下，后期不会出现大面积重构迁移。当前阶段优先验证了网站测试和代码测试两个核心闭环。
 
 **为什么用 FastAPI 而不是 Django？**
-项目核心是异步 IO 密集型任务（LLM 调用、代码执行、并发测试），FastAPI 的 asyncio 原生支持比 Django 的同步模型更适合。同时 Pydantic 类型系统天然适配项目中的 Schema 定义。
+
+核心任务是异步 IO 密集型（LLM 调用、代码执行、并发测试），FastAPI 的 asyncio 原生支持更适合。
 
 **为什么用 LiteLLM 而不是直接调 OpenAI SDK？**
-避免供应商锁定。通过 LiteLLM 统一接口可以随时切换 DeepSeek / DashScope / Ollama 等 100+ 模型，还能做三通道降级（API → 本地 → 模板），控制成本。
 
-**为什么 5 个 Agent 协作而不是 1 个大 Agent？**
-单一 Agent 面对复杂测试任务容易遗漏步骤或产生幻觉。拆分为 5 个专职 Agent 各司其职，外加 Reviewer 的反思自纠机制，大幅提升生成质量和可观测性。
-
-**为什么用 tree-sitter 做 AST 分析？**
-正则表达式无法处理多语言语法差异和嵌套结构。tree-sitter 是 C 级性能的增量解析器，不会因代码量增大而线性变慢。
+避免供应商锁定，可随时切换 DeepSeek / DashScope / Ollama 等 100+ 模型，同时支持三通道降级控制成本。
 
 ---
 
@@ -143,9 +158,8 @@ Users
 pip install -r requirements.txt
 cd frontend && npm install && cd ..
 
-# 2. 配置环境变量
+# 2. 配置环境变量（可选，不填则使用模板引擎降级）
 cp .env.example .env
-# 编辑 .env，填入 LLM API Key（可选，不填则使用模板引擎降级）
 
 # 3. 启动后端
 python -m uvicorn backend.main:app --host 0.0.0.0 --port 9876 --reload
@@ -158,48 +172,22 @@ cd frontend && npm run dev
 # API 文档: http://localhost:9876/api/docs
 ```
 
-CLI 用法：
-
-```bash
-python cli/main.py design                # 打开可视化设计器
-python cli/main.py create "用户登录的异常情况"  # 自然语言生成测试
-python cli/main.py run --smart           # TIA 智能选择执行
-python cli/main.py analyze --impact HEAD~1  # 变更影响分析
-python cli/main.py dashboard --port 9876 # 启动 Web Dashboard
-```
-
 ---
 
-## 前端页面
+## API 概览（核心端点）
 
-| 页面 | 功能 |
-|------|------|
-| Dashboard | 流水线实时进度、WebSocket 日志流 |
-| 测试设计器 | 可视化编排测试步骤 |
-| 执行中心 | 选择策略触发生成+执行 |
-| 网站测试 | 输入 URL → 自动扫描+测试+PDF 报告 |
-| Agent Playground | AI Agent 自主测试演示 |
-| Code Tester | 单文件/项目级代码综合测试 |
-| 报告 | 统计图表 + 多格式下载 (HTML/JSON/JUnit/PDF) |
-| 设置 | LLM 提供商配置 |
-
----
-
-## API 概览
-
-| 端点 | 方法 | 说明 |
-|------|------|------|
-| `/api/auth/login` | POST | JWT 登录 |
-| `/api/code/comprehensive-test` | POST | 代码综合测试（分析+生成+执行+安全） |
-| `/api/code/project-test` | POST | 项目级批量测试 |
-| `/api/tests/` | CRUD | 测试用例管理 |
-| `/api/executions/run` | POST | 触发执行 |
-| `/api/executions/analyze/*` | GET/POST | TIA / Flaky / 健康度 |
-| `/api/reports/html\|json\|junit\|pdf` | GET | 多格式报告 |
-| `/api/website/scan` | POST | 网站自动测试 |
-| `/api/intelligence/agent/run` | POST | Agent 自主测试 |
-| `/api/intelligence/rag/generate` | POST | RAG 增强生成 |
-| `/ws/events` | WebSocket | 实时事件推送 |
+| 端点 | 方法 | 说明 | 状态 |
+|------|------|------|:--:|
+| `/api/auth/login` | POST | JWT 登录 | ✅ |
+| `/api/website/scan` | POST | 网站自动测试 | ✅ |
+| `/api/code/comprehensive-test` | POST | 代码综合测试 | ✅ |
+| `/api/code/project-test` | POST | 项目级批量测试 | ✅ |
+| `/api/token-usage/` | GET | Token 用量查询 | ✅ |
+| `/api/settings/` | GET/PUT | 系统设置 | ✅ |
+| `/api/tests/` | CRUD | 测试用例管理 | 🚧 |
+| `/api/intelligence/agent/run` | POST | Agent 自主测试 | 🔮 |
+| `/api/intelligence/rag/generate` | POST | RAG 增强生成 | 🔮 |
+| `/ws/events` | WebSocket | 实时事件推送 | 🔮 |
 
 ---
 
@@ -207,45 +195,24 @@ python cli/main.py dashboard --port 9876 # 启动 Web Dashboard
 
 ```
 testforge/
-├── backend/                  # FastAPI 后端 (24,173 行)
+├── backend/                  # FastAPI 后端 (~24,000 行)
 │   ├── main.py               # 应用入口
 │   ├── config.py             # Pydantic Settings 配置
-│   ├── api/                  # REST API 路由 (15 模块)
+│   ├── api/                  # REST API 路由 (15 模块，6 个已激活)
 │   ├── core/                 # Pipeline / TIA / Agent / RAG / Scheduler
 │   ├── generator/            # 五策略生成器 + OpenAPI 解析器
 │   ├── executors/            # 代码执行器 / HTTP 执行器 / 浏览器执行器
 │   ├── safety/               # 认证 / 限流 / 日志 / 沙箱 / 密钥扫描
 │   ├── analyzer/             # 多语言静态分析器 (tree-sitter)
-│   ├── reporter/             # JUnit / JSON / HTML / PDF 报告
+│   ├── reporter/             # 多格式报告
 │   ├── quality/              # 覆盖率 / 变异测试 / Flaky 检测
-│   ├── integrations/         # Keploy 流量录制
 │   ├── models/               # 数据模型
-│   ├── migrations/           # 数据库迁移
 │   └── dsl/                  # 测试场景 DSL
-├── frontend/                 # React 18 + TypeScript (6,504 行, 8 页面)
-│   └── src/
-│       ├── pages/            # 页面组件
-│       └── components/       # 通用组件
-├── cli/                      # testgen CLI (451 行)
-├── tests/                    # pytest 测试 (5,209 行, 195 用例)
-├── docker/                   # Docker Compose 部署
-├── docs/                     # 文档与 SOP
-└── examples/                 # 多语言示例项目
-```
-
----
-
-## 运行测试
-
-```bash
-# 全部测试
-python -m pytest tests/ -v
-
-# 带覆盖率报告
-python -m pytest tests/ -v --cov=backend --cov-report=html
-
-# 只跑核心模块
-python -m pytest tests/test_core.py tests/test_agent_core.py -v
+├── frontend/                 # React 18 + TypeScript (~6,500 行, 14 页面)
+│   └── src/pages/            # 页面组件（4 个已激活）
+├── cli/                      # testgen CLI
+├── tests/                    # pytest 测试
+└── docs/                     # 文档
 ```
 
 ---
