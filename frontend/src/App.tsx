@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+﻿import { useEffect, useState } from "react";
 import { Routes, Route, NavLink, Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "./auth";
 import Login from "./pages/Login";
@@ -86,33 +86,16 @@ const contentWrapper: React.CSSProperties = {
 
 const NAV_ITEMS = [
   {
-    group: "概览",
-    items: [{ to: "/", icon: "📊", label: "Dashboard" }],
-  },
-  {
     group: "测试",
     items: [
-      { to: "/design", icon: "🎨", label: "测试设计器" },
-      { to: "/tests", icon: "📰", label: "测试列表" },
-      { to: "/execute", icon: "🚀", label: "执行中心" },
       { to: "/website", icon: "🌐", label: "网站测试" },
-      { to: "/code", icon: "💻", label: "代码测试" },
-    ],
-  },
-  {
-    group: "智能",
-    items: [
-      { to: "/agent", icon: "🤖", label: "Agent Playground" },
-      { to: "/schedule", icon: "⏰", label: "定时巡察" },
-      { to: "/evolution", icon: "🧠", label: "自进化" },
+      { to: "/code", icon: "🔇", label: "代码测试" },
     ],
   },
   {
     group: "分析",
     items: [
-      { to: "/impact", icon: "🎯", label: "影响分析" },
-      { to: "/token", icon: "💵", label: "Token 用量" },
-      { to: "/reports", icon: "📱", label: "报告" },
+      { to: "/token", icon: "💰", label: "Token 用量" },
     ],
   },
   {
@@ -223,7 +206,7 @@ function ProtectedLayout() {
       <main style={mainStyle}>
         <div style={contentWrapper}>
           <Routes>
-            <Route path="/" element={<Dashboard />} />
+            <Route path="/" element={<Navigate to="/website" replace />} />
             <Route path="/design" element={<TestDesigner />} />
             <Route path="/tests" element={<TestList />} />
             <Route path="/execute" element={<ExecutionCenter />} />
