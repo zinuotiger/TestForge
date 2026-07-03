@@ -33,18 +33,24 @@ def _log_request(request: Request, status: int, elapsed: float, trace_id: str):
         "elapsed_ms": round(elapsed * 1000),
         "client": request.client.host if request.client else "unknown",
     }
-    logger.info(json.dumps(log_data, ensure_ascii=False))
+    logger.info(json.dumps(log_data, ensure_ascii=False, default=str))
 
 
 def setup_logging(level: str = "INFO"):
     """配置结构化日志"""
-    handler = logging.StreamHandler()
+    import sys as _sys
+    handler = logging.StreamHandler(_sys.stdout)
     handler.setFormatter(logging.Formatter(
         '{"time":"%(asctime)s","level":"%(levelname)s","message":%(message)s}',
         datefmt="%Y-%m-%dT%H:%M:%S",
     ))
     root = logging.getLogger()
     root.handlers.clear()
+    # Ensure UTF-8 encoding on Windows to avoid GBK encode errors
+    try:
+        handler.stream.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
     root.addHandler(handler)
     root.setLevel(getattr(logging, level.upper(), logging.INFO))
 

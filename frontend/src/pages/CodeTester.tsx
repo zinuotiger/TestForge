@@ -201,6 +201,7 @@ export default function CodeTester() {
                 value={folderPath}
                 onChange={(e) => setFolderPath(e.target.value)}
                 style={{ ...inputStyle, flex: 1 }}
+                title="输入项目文件夹路径（也可以是单个 .py 文件，会自动使用其所在目录）"
               />
             </div>
             <p style={{ color: "#64748b", fontSize: "0.75rem", marginTop: "-0.5rem", marginBottom: "1rem" }}>
@@ -239,6 +240,11 @@ export default function CodeTester() {
 
       {projectResult && (
         <div style={{ marginTop: "1.5rem" }}>
+          {projectResult.error ? (
+            <div style={{ ...cardStyle, border: "1px solid #ef4444", color: "#ef4444", marginBottom: "0.75rem" }}>
+              ❌ {projectResult.error}
+            </div>
+          ) : null}
           <h3 style={{ color: "#e2e8f0", fontSize: "1.1rem", marginBottom: "0.75rem" }}>
             ✅ 项目测试结果 ({projectResult.total_files} 个文件)
           </h3>

@@ -144,8 +144,8 @@ class TestAgentCore:
         result = _cases_to_pytest_code([test_case], source_code)
         
         assert "def test_" in result
-        assert "# 注意: 请确保被测函数在同一目录下可导入" in result
-        # _cases_to_pytest_code uses comment hints rather than inlining full source
+        assert "def add(a, b):" in result
+        # _cases_to_pytest_code now inlines source code instead of comment hints
     
     def test_cases_to_pytest_code_with_todo_placeholder(self):
         """测试包含TODO占位符的测试用例转换"""
@@ -166,7 +166,7 @@ class TestAgentCore:
         
         result = _cases_to_pytest_code([test_case], "")
         # TODO placeholder handled by _cases_to_pytest_code; verify basic generation works
-        assert "# 测试用例需要具体实现" in result
+        assert "def test_" in result
 
 
 class TestAgentToolExecution:

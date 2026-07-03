@@ -54,3 +54,6 @@ htmlcov/
 ssl/*.pem
 ssl/*.crt
 ssl/*.key
+
+# Internal docs (not for public)
+docs/

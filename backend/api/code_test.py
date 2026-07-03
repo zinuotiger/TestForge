@@ -143,7 +143,7 @@ async def comprehensive_code_test(req: CodeTestRequest, user: str = Depends(get_
         score = 100
         if failed > 0:
             score -= failed * 10
-        if result.analysis.get("smells", 0) > 3:
+        if len(result.analysis.get("smells", [])) > 3:
             score -= 10
         if result.security.get("risks_found", 0) > 0:
             score -= 15
@@ -169,16 +169,18 @@ async def comprehensive_code_test(req: CodeTestRequest, user: str = Depends(get_
             "language": req.language,
         }
         result.status = "completed"
+        return result
 
     except Exception as e:
+        import traceback
+        tb = traceback.format_exc()
         logger.error("代码综合测试失败: %s", e)
+        logger.error(tb)
         result.status = "error"
-        result.error = str(e)
-
-    result.duration_ms = int((time.time() - start) * 1000)
-    return result
-
-
+        result.error = str(e) or type(e).__name__
+        if not result.summary:
+            result.summary = {"note": "error: " + (str(e) or type(e).__name__)}
+        return result
 @router.post("/generate-only")
 async def generate_tests_only(req: CodeTestRequest, user: str = Depends(get_current_user)):
     """仅生成测试用例（不执行）
@@ -221,8 +223,14 @@ async def project_code_test(req: ProjectTestRequest, user: str = Depends(get_cur
     logger.info("[PROJECT-TEST] Received folder_path: %s", req.folder_path)
     logger.info("[PROJECT-TEST] Resolved path: %s", folder)
     logger.info("[PROJECT-TEST] Is directory: %s", os.path.isdir(folder))
+    # 如果用户传的是文件路径，自动取父目录
+    if os.path.isfile(folder):
+        logger.info("[PROJECT-TEST] 传入的是文件，自动切换到父目录")
+        folder = os.path.dirname(folder)
+    
     if not os.path.isdir(folder):
-        return ProjectTestResult(status="error", error=f"目录不存在: {folder}")
+        logger.error("[PROJECT-TEST] 路径不是目录: %s", folder)
+        return ProjectTestResult(status="error", error=f"目录不存在: {folder}，请传入文件夹路径而非文件路径")
 
     EXCLUDE_DIRS = {"__pycache__", ".git", "node_modules", "venv", ".venv", "dist", "build", ".tox", ".pytest_cache", ".mypy_cache"}
     py_files = []
@@ -253,7 +261,7 @@ async def project_code_test(req: ProjectTestRequest, user: str = Depends(get_cur
 
         try:
             with open(filepath, "r", encoding="utf-8", errors="replace") as f:
-                code = f.read()
+                code = f.read().lstrip("﻿")
             if len(code.strip()) < 10:
                 item.status = "completed"
                 item.summary = {"note": "文件为空或过短，已跳过"}
